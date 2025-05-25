@@ -1,72 +1,227 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native"
+"use client"
+
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { Colors } from "../../constants/colors"
+import { useAuth } from "../hooks/useAuth"
+import { useTransactions } from "../hooks/useTransactions"
+import { useBudgets } from "../hooks/useBudgets"
+import { useState, useMemo } from "react"
+import { router } from "expo-router"
+import type { Transaction, Budget } from "../../types"
 
 export default function HomeScreen() {
-  const currentBalance = 2450.75
-  const monthlyIncome = 3500.0
-  const monthlyExpenses = 1049.25
+  const { user } = useAuth()
+  const { transactions, loading: transactionsLoading, refetch: refetchTransactions } = useTransactions()
+  const { budgets, loading: budgetsLoading, refetch: refetchBudgets } = useBudgets(user?.uid)
+  const [refreshing, setRefreshing] = useState(false)
+  const [userProfile, setUserProfile] = useState<{ name?: string }>({})
 
-  const recentTransactions = [
-    { id: 1, title: "Grocery Shopping", amount: -85.5, category: "Food", date: "Today" },
-    { id: 2, title: "Salary", amount: 3500.0, category: "Income", date: "Yesterday" },
-    { id: 3, title: "Coffee", amount: -4.5, category: "Food", date: "Yesterday" },
-    { id: 4, title: "Gas", amount: -45.0, category: "Transport", date: "2 days ago" },
-  ]
+  // Calculate financial summary
+  const financialSummary = useMemo(() => {
+    const totalIncome = transactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
+
+    const totalExpenses = transactions.filter((t) => t.type === "expense").reduce((sum, t) => sum + t.amount, 0)
+
+    const currentBalance = totalIncome - totalExpenses
+
+    return { totalIncome, totalExpenses, currentBalance }
+  }, [transactions])
+
+  // Get recent transactions (last 5)
+  const recentTransactions = useMemo(() => {
+    return transactions.slice(0, 5)
+  }, [transactions])
+
+  // Get greeting based on time
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 12) return "Good morning"
+    if (hour < 17) return "Good afternoon"
+    return "Good evening"
+  }
+
+  const onRefresh = async () => {
+    await Promise.all([
+      refetchTransactions(),
+      refetchBudgets()
+    ])
+  }
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(amount)
+  }
+
+  const formatDate = (date: Date) => {
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    if (date.toDateString() === today.toDateString()) {
+      return "Today"
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday"
+    } else {
+      return date.toLocaleDateString()
+    }
+  }
+
+  const renderTransactionItem = (transaction: any) => (
+    <TouchableOpacity
+      key={transaction.id}
+      style={styles.transactionItem}
+      onPress={() => {
+        // Navigate to transaction details or edit
+        console.log("Transaction tapped:", transaction.id)
+      }}
+    >
+      <View style={styles.transactionLeft}>
+        <View style={[styles.categoryIcon, { backgroundColor: transaction.type === "income" ? "#10B981" : "#EF4444" }]}>
+          <Ionicons name={transaction.type === "income" ? "add" : "remove"} size={16} color="white" />
+        </View>
+        <View>
+          <Text style={styles.transactionTitle}>{transaction.title}</Text>
+          <Text style={styles.transactionCategory}>
+            {transaction.category} • {formatDate(transaction.date)}
+          </Text>
+        </View>
+      </View>
+      <Text style={[styles.transactionAmount, { color: transaction.type === "income" ? "#10B981" : "#EF4444" }]}>
+        {transaction.type === "income" ? "+" : "-"}
+        {formatCurrency(transaction.amount)}
+      </Text>
+    </TouchableOpacity>
+  )
+
+  if (!user) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>Please log in to continue</Text>
+      </View>
+    )
+  }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
       <View style={styles.header}>
-        <Text style={styles.greeting}>Good morning!</Text>
+        <Text style={styles.greeting}>
+          {getGreeting()}
+          {user?.displayName ? `, ${user.displayName.split(" ")[0]}` : ""}!
+        </Text>
         <Text style={styles.subtitle}>Here's your financial overview</Text>
       </View>
 
       <View style={styles.balanceCard}>
         <Text style={styles.balanceLabel}>Current Balance</Text>
-        <Text style={styles.balanceAmount}>${currentBalance.toFixed(2)}</Text>
+        <Text style={styles.balanceAmount}>{formatCurrency(financialSummary.currentBalance)}</Text>
       </View>
 
       <View style={styles.summaryRow}>
         <View style={[styles.summaryCard, styles.incomeCard]}>
           <Ionicons name="trending-up" size={24} color="#10B981" />
-          <Text style={styles.summaryLabel}>Income</Text>
-          <Text style={styles.summaryAmount}>+${monthlyIncome.toFixed(2)}</Text>
+          <View>
+            <Text style={styles.summaryLabel}>Income</Text>
+            <Text style={styles.summaryAmount}>{formatCurrency(financialSummary.totalIncome)}</Text>
+          </View>
         </View>
 
         <View style={[styles.summaryCard, styles.expenseCard]}>
           <Ionicons name="trending-down" size={24} color="#EF4444" />
-          <Text style={styles.summaryLabel}>Expenses</Text>
-          <Text style={styles.summaryAmount}>-${monthlyExpenses.toFixed(2)}</Text>
+          <View>
+            <Text style={styles.summaryLabel}>Expenses</Text>
+            <Text style={styles.summaryAmount}>{formatCurrency(financialSummary.totalExpenses)}</Text>
+          </View>
         </View>
+      </View>
+
+      {/* Quick Actions */}
+      <View style={styles.quickActions}>
+        <TouchableOpacity style={styles.quickActionButton} onPress={() => router.push("/(tabs)/add")}>
+          <Ionicons name="add-circle" size={24} color={Colors.primary} />
+          <Text style={styles.quickActionText}>Add Transaction</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.quickActionButton} onPress={() => router.push("/(tabs)/budgets")}>
+          <Ionicons name="pie-chart" size={24} color={Colors.primary} />
+          <Text style={styles.quickActionText}>View Budgets</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Transactions</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/(tabs)/logs")}>
             <Text style={styles.seeAllText}>See All</Text>
           </TouchableOpacity>
         </View>
 
-        {recentTransactions.map((transaction) => (
-          <View key={transaction.id} style={styles.transactionItem}>
-            <View style={styles.transactionLeft}>
-              <View style={[styles.categoryIcon, { backgroundColor: transaction.amount > 0 ? "#10B981" : "#EF4444" }]}>
-                <Ionicons name={transaction.amount > 0 ? "add" : "remove"} size={16} color="white" />
-              </View>
-              <View>
-                <Text style={styles.transactionTitle}>{transaction.title}</Text>
-                <Text style={styles.transactionCategory}>
-                  {transaction.category} • {transaction.date}
-                </Text>
-              </View>
-            </View>
-            <Text style={[styles.transactionAmount, { color: transaction.amount > 0 ? "#10B981" : "#EF4444" }]}>
-              {transaction.amount > 0 ? "+" : ""}${Math.abs(transaction.amount).toFixed(2)}
-            </Text>
+        {transactionsLoading ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading transactions...</Text>
           </View>
-        ))}
+        ) : recentTransactions.length > 0 ? (
+          recentTransactions.map(renderTransactionItem)
+        ) : (
+          <View style={styles.emptyState}>
+            <Ionicons name="receipt-outline" size={48} color={Colors.textSecondary} />
+            <Text style={styles.emptyStateText}>No transactions yet</Text>
+            <Text style={styles.emptyStateSubtext}>Start by adding your first income or expense</Text>
+            <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push("/(tabs)/add")}>
+              <Text style={styles.emptyStateButtonText}>Add Transaction</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
+
+      {/* Budget Overview */}
+      {budgets.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Budget Overview</Text>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/budgets")}>
+              <Text style={styles.seeAllText}>View All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.budgetOverview}>
+            {budgets.slice(0, 3).map((budget) => {
+              const percentage = Math.min((budget.spent / budget.amount) * 100, 100)
+              const isOverBudget = budget.spent > budget.amount
+
+              return (
+                <View key={budget.id} style={styles.budgetItem}>
+                  <Text style={styles.budgetCategory}>{budget.category}</Text>
+                  <View style={styles.budgetProgress}>
+                    <View style={styles.budgetProgressBar}>
+                      <View
+                        style={[
+                          styles.budgetProgressFill,
+                          {
+                            width: `${Math.min(percentage, 100)}%`,
+                            backgroundColor: isOverBudget ? "#EF4444" : "#10B981",
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={[styles.budgetPercentage, { color: isOverBudget ? "#EF4444" : Colors.text }]}>
+                      {percentage.toFixed(0)}%
+                    </Text>
+                  </View>
+                  <Text style={styles.budgetAmount}>
+                    {formatCurrency(budget.spent)} / {formatCurrency(budget.amount)}
+                  </Text>
+                </View>
+              )
+            })}
+          </View>
+        </View>
+      )}
     </ScrollView>
   )
 }
@@ -75,6 +230,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  loadingText: {
+    color: Colors.textSecondary,
+    fontSize: 16,
   },
   header: {
     padding: 20,
@@ -117,8 +282,9 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     padding: 16,
     borderRadius: 12,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
   },
   incomeCard: {
     borderLeftWidth: 4,
@@ -133,8 +299,30 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   summaryAmount: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "600",
+    color: Colors.text,
+    marginTop: 2,
+  },
+  quickActions: {
+    flexDirection: "row",
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    gap: 12,
+  },
+  quickActionButton: {
+    flex: 1,
+    backgroundColor: "white",
+    padding: 16,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  quickActionText: {
+    fontSize: 14,
+    fontWeight: "500",
     color: Colors.text,
   },
   section: {
@@ -169,6 +357,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    flex: 1,
   },
   categoryIcon: {
     width: 32,
@@ -190,5 +379,73 @@ const styles = StyleSheet.create({
   transactionAmount: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  emptyState: {
+    alignItems: "center",
+    padding: 40,
+    backgroundColor: "white",
+    borderRadius: 12,
+  },
+  emptyStateText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: Colors.text,
+    marginTop: 16,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  emptyStateButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  emptyStateButtonText: {
+    color: "white",
+    fontWeight: "600",
+  },
+  budgetOverview: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 16,
+  },
+  budgetItem: {
+    marginBottom: 16,
+  },
+  budgetCategory: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  budgetProgress: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  budgetProgressBar: {
+    flex: 1,
+    height: 6,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 3,
+  },
+  budgetProgressFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  budgetPercentage: {
+    fontSize: 12,
+    fontWeight: "500",
+    minWidth: 30,
+  },
+  budgetAmount: {
+    fontSize: 12,
+    color: Colors.textSecondary,
   },
 })

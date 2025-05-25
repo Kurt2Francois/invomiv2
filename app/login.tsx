@@ -4,6 +4,7 @@ import { useState } from "react"
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native"
 import { Link, router } from "expo-router"
 import { Colors } from "../constants/colors"
+import { loginUser } from "./services/authService"
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("")
@@ -16,17 +17,50 @@ export default function LoginScreen() {
       return
     }
 
+    if (!isValidEmail(email)) {
+      Alert.alert("Error", "Please enter a valid email address")
+      return
+    }
+
     setLoading(true)
     try {
-      // TODO: Implement Firebase login
-      console.log("Login attempt:", { email, password })
-      // Simulate login success
+      await loginUser(email.trim(), password)
+
+      // Clear form
+      setEmail("")
+      setPassword("")
+
+      // Navigate to main app
       router.replace("/(tabs)")
-    } catch (error) {
-      Alert.alert("Error", "Login failed. Please try again.")
+
+      Alert.alert("Success", "Welcome back!")
+    } catch (error: any) {
+      console.error("Login error:", error)
+
+      // Handle specific Firebase auth errors
+      let errorMessage = "Login failed. Please try again."
+
+      if (error.code === "auth/user-not-found") {
+        errorMessage = "No account found with this email address."
+      } else if (error.code === "auth/wrong-password") {
+        errorMessage = "Incorrect password. Please try again."
+      } else if (error.code === "auth/invalid-email") {
+        errorMessage = "Invalid email address format."
+      } else if (error.code === "auth/user-disabled") {
+        errorMessage = "This account has been disabled."
+      } else if (error.code === "auth/too-many-requests") {
+        errorMessage = "Too many failed attempts. Please try again later."
+      }
+
+      Alert.alert("Login Failed", errorMessage)
     } finally {
       setLoading(false)
     }
+  }
+
+  const isValidEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
   }
 
   return (
@@ -42,6 +76,8 @@ export default function LoginScreen() {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
+          editable={!loading}
         />
 
         <TextInput
@@ -50,6 +86,7 @@ export default function LoginScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          editable={!loading}
         />
 
         <TouchableOpacity
@@ -63,11 +100,19 @@ export default function LoginScreen() {
         <View style={styles.footer}>
           <Text style={styles.footerText}>Don't have an account? </Text>
           <Link href="/register" asChild>
-            <TouchableOpacity>
-              <Text style={styles.linkText}>Sign Up</Text>
+            <TouchableOpacity disabled={loading}>
+              <Text style={[styles.linkText, loading && styles.linkDisabled]}>Sign Up</Text>
             </TouchableOpacity>
           </Link>
         </View>
+
+        <TouchableOpacity
+          style={styles.forgotPassword}
+          onPress={() => Alert.alert("Info", "Password reset feature coming soon!")}
+          disabled={loading}
+        >
+          <Text style={[styles.forgotPasswordText, loading && styles.linkDisabled]}>Forgot Password?</Text>
+        </TouchableOpacity>
       </View>
     </View>
   )
@@ -128,5 +173,16 @@ const styles = StyleSheet.create({
   linkText: {
     color: Colors.primary,
     fontWeight: "600",
+  },
+  linkDisabled: {
+    opacity: 0.5,
+  },
+  forgotPassword: {
+    alignItems: "center",
+    marginTop: 10,
+  },
+  forgotPasswordText: {
+    color: Colors.primary,
+    fontSize: 14,
   },
 })

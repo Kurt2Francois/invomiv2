@@ -6,13 +6,16 @@ import { Colors } from "../../constants/colors"
 import { useAuth } from "../hooks/useAuth"
 import { useTransactions } from "../hooks/useTransactions"
 import { useBudgets } from "../hooks/useBudgets"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { router } from "expo-router"
 import type { Transaction, Budget } from "../../types"
+import { useTransactionRefresh } from "../../context/TransactionContext"
+import { Timestamp } from "firebase/firestore"
 
 export default function HomeScreen() {
   const { user } = useAuth()
-  const { transactions, loading: transactionsLoading, refetch: refetchTransactions } = useTransactions()
+  const { refreshKey } = useTransactionRefresh()
+  const { transactions, loading: transactionsLoading, refetch: refetchTransactions } = useTransactions(user?.uid)
   const { budgets, loading: budgetsLoading, refetch: refetchBudgets } = useBudgets(user?.uid)
   const [refreshing, setRefreshing] = useState(false)
   const [userProfile, setUserProfile] = useState<{ name?: string }>({})
@@ -28,9 +31,18 @@ export default function HomeScreen() {
     return { totalIncome, totalExpenses, currentBalance }
   }, [transactions])
 
-  // Get recent transactions (last 5)
+  // Get recent transactions (last 5) with proper date handling
   const recentTransactions = useMemo(() => {
-    return transactions.slice(0, 5)
+    return transactions
+      .map(transaction => {
+        const date = transaction.date instanceof Timestamp ? transaction.date.toDate() : transaction.date
+        return {
+          ...transaction,
+          date
+        }
+      })
+      .sort((a, b) => b.date.getTime() - a.date.getTime())
+      .slice(0, 5)
   }, [transactions])
 
   // Get greeting based on time
@@ -41,11 +53,24 @@ export default function HomeScreen() {
     return "Good evening"
   }
 
+  useEffect(() => {
+    refetchTransactions()
+    refetchBudgets()
+  }, [refreshKey])
+
+  // Update onRefresh to handle loading state
   const onRefresh = async () => {
-    await Promise.all([
-      refetchTransactions(),
-      refetchBudgets()
-    ])
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        refetchTransactions(),
+        refetchBudgets()
+      ])
+    } catch (error) {
+      console.error("Refresh error:", error)
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   const formatCurrency = (amount: number) => {
@@ -69,32 +94,47 @@ export default function HomeScreen() {
     }
   }
 
-  const renderTransactionItem = (transaction: any) => (
-    <TouchableOpacity
-      key={transaction.id}
-      style={styles.transactionItem}
-      onPress={() => {
-        // Navigate to transaction details or edit
-        console.log("Transaction tapped:", transaction.id)
-      }}
-    >
-      <View style={styles.transactionLeft}>
-        <View style={[styles.categoryIcon, { backgroundColor: transaction.type === "income" ? "#10B981" : "#EF4444" }]}>
-          <Ionicons name={transaction.type === "income" ? "add" : "remove"} size={16} color="white" />
+  // Update renderTransactionItem to handle dates properly
+  const renderTransactionItem = (transaction: Transaction) => {
+    const date = transaction.date instanceof Timestamp ? transaction.date.toDate() : transaction.date
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+    return (
+      <TouchableOpacity
+        key={transaction.id}
+        style={styles.transactionItem}
+        onPress={() => {
+          console.log("Transaction tapped:", transaction.id)
+        }}
+      >
+        <View style={styles.transactionLeft}>
+          <View style={[styles.categoryIcon, { backgroundColor: transaction.type === "income" ? "#10B981" : "#EF4444" }]}>
+            <Ionicons name={transaction.type === "income" ? "add" : "remove"} size={16} color="white" />
+          </View>
+          <View>
+            <Text style={styles.transactionTitle}>{transaction.title}</Text>
+            <Text style={styles.transactionCategory}>
+              {transaction.category} • {dateKey}
+            </Text>
+          </View>
         </View>
-        <View>
-          <Text style={styles.transactionTitle}>{transaction.title}</Text>
-          <Text style={styles.transactionCategory}>
-            {transaction.category} • {formatDate(transaction.date)}
-          </Text>
-        </View>
-      </View>
-      <Text style={[styles.transactionAmount, { color: transaction.type === "income" ? "#10B981" : "#EF4444" }]}>
-        {transaction.type === "income" ? "+" : "-"}
-        {formatCurrency(transaction.amount)}
-      </Text>
-    </TouchableOpacity>
-  )
+        <Text style={[styles.transactionAmount, { color: transaction.type === "income" ? "#10B981" : "#EF4444" }]}>
+          {transaction.type === "income" ? "+" : "-"}
+          {formatCurrency(transaction.amount)}
+        </Text>
+      </TouchableOpacity>
+    )
+  }
+
+  useEffect(() => {
+    const handleTransactionAdded = () => {
+      refetchTransactions()
+      refetchBudgets()
+    }
+
+    window.addEventListener('TRANSACTION_ADDED', handleTransactionAdded)
+    return () => window.removeEventListener('TRANSACTION_ADDED', handleTransactionAdded)
+  }, [refetchTransactions, refetchBudgets])
 
   if (!user) {
     return (

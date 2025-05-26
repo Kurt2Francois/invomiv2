@@ -9,10 +9,12 @@ import { useAuth } from "../hooks/useAuth"
 import { addTransaction } from "../services/transactionService"
 import { getCategories } from "../services/categoryService"
 import { addBudget, getBudgetByCategory, updateBudgetSpent } from "../services/budgetService"
+import { useTransactionRefresh } from "../../context/TransactionContext"
 import type { Category, TransactionFormData } from "../../types"
 
 export default function AddScreen() {
   const { user } = useAuth()
+  const { triggerRefresh } = useTransactionRefresh()
   const [loading, setLoading] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [loadingCategories, setLoadingCategories] = useState(true)
@@ -75,7 +77,7 @@ export default function AddScreen() {
     setLoading(true)
     try {
       // Add transaction
-      const transactionId = await addTransaction({
+      await addTransaction({
         userId: user.uid,
         type: formData.type,
         amount,
@@ -84,8 +86,8 @@ export default function AddScreen() {
         note: formData.note?.trim() || undefined,
         date: formData.date,
       })
-
-      // Update budget if it's an expense
+      
+      // Update budget if needed
       if (formData.type === "expense") {
         try {
           const budget = await getBudgetByCategory(user.uid, formData.category)
@@ -95,9 +97,11 @@ export default function AddScreen() {
           }
         } catch (budgetError) {
           console.error("Error updating budget:", budgetError)
-          // Don't fail the transaction if budget update fails
         }
       }
+
+      // Trigger refresh
+      triggerRefresh()
 
       // Reset form
       setFormData({
@@ -109,16 +113,11 @@ export default function AddScreen() {
         date: new Date(),
       })
 
-      Alert.alert("Success", "Transaction added successfully!", [
-        {
-          text: "Add Another",
-          style: "default",
-        },
-        {
-          text: "View Transactions",
-          onPress: () => router.push("/(tabs)/logs"),
-        },
-      ])
+      // Navigate to home screen immediately
+      router.replace("/(tabs)")
+
+      // Show success toast or alert
+      Alert.alert("Success", "Transaction added successfully!")
     } catch (error: any) {
       console.error("Add transaction error:", error)
 

@@ -20,9 +20,11 @@ import { useTransactions } from "../hooks/useTransactions"
 import { deleteBudget, createMonthlyBudget } from "../services/budgetService"
 import { getCategories } from "../services/categoryService"
 import type { Category, BudgetFormData, Budget } from "../../types"
+import { useTransactionRefresh } from "../../context/TransactionContext"
 
 export default function BudgetsScreen() {
   const { user } = useAuth()
+  const { refreshKey } = useTransactionRefresh()
   const { budgets, loading: budgetsLoading, refetch: refetchBudgets } = useBudgets(user?.uid)
   const { transactions } = useTransactions("expense")
   const [showAddModal, setShowAddModal] = useState(false)
@@ -39,6 +41,19 @@ export default function BudgetsScreen() {
   useEffect(() => {
     loadCategories()
   }, [user])
+
+  useEffect(() => {
+    const handleTransactionAdded = () => {
+      refetchBudgets()
+    }
+
+    window.addEventListener("TRANSACTION_ADDED", handleTransactionAdded)
+    return () => window.removeEventListener("TRANSACTION_ADDED", handleTransactionAdded)
+  }, [refetchBudgets])
+
+  useEffect(() => {
+    refetchBudgets()
+  }, [refreshKey])
 
   const loadCategories = async () => {
     if (!user) return

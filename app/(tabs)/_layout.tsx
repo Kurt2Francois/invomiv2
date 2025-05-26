@@ -19,6 +19,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
+          headerShown: false,
           tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
         }}
       />
@@ -26,6 +27,7 @@ export default function TabLayout() {
         name="logs"
         options={{
           title: "Logs",
+          headerShown: false,
           tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
         }}
       />
@@ -33,6 +35,7 @@ export default function TabLayout() {
         name="add"
         options={{
           title: "Add",
+          headerShown: false,
           tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" size={size} color={color} />,
         }}
       />
@@ -40,6 +43,7 @@ export default function TabLayout() {
         name="budgets"
         options={{
           title: "Budgets",
+          headerShown: false,
           tabBarIcon: ({ color, size }) => <Ionicons name="pie-chart" size={size} color={color} />,
         }}
       />
@@ -47,6 +51,7 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: "Profile",
+          headerShown: false,
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
         }}
       />

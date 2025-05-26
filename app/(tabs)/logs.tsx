@@ -1,96 +1,87 @@
 "use client"
 
-import { useState, useMemo } from "react"
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from "react-native"
+import { useState, useMemo, useEffect } from "react"
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { Colors } from "../../constants/colors"
 import { useTransactions } from "../hooks/useTransactions"
 import { useAuth } from "../hooks/useAuth"
-import { Transaction } from "../services/transactionService"
-
-type FilterType = "all" | "income" | "expense"
+import { convertToDate, formatDate, formatTime, getDateKey } from "../../utils/dateUtils"
+import type { Transaction } from "../../types"
+import { Timestamp } from "firebase/firestore"
+import { useTransactionRefresh } from "../../context/TransactionContext"
 
 export default function LogsScreen() {
   const { user } = useAuth()
+  const { refreshKey } = useTransactionRefresh()
   const { transactions, loading, error, refetch } = useTransactions(user?.uid)
   const [refreshing, setRefreshing] = useState(false)
-  const [selectedFilter, setSelectedFilter] = useState<FilterType>("all")
+  const [selectedFilter, setSelectedFilter] = useState<"all" | "income" | "expense">("all")
 
   const onRefresh = async () => {
     setRefreshing(true)
     try {
       await refetch()
-    } catch (error) {
-      console.error("Refresh error:", error)
+    } catch (err) {
+      console.error("Refresh error:", err)
+      Alert.alert("Error", "Failed to refresh transactions")
     } finally {
       setRefreshing(false)
     }
   }
 
-  // Calculate daily totals
-  const dailyTotals = useMemo(() => {
-    const today = new Date()
-    const todayTransactions = transactions.filter((t) => t.date.toDateString() === today.toDateString())
-
-    const dailyIncome = todayTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0)
-
-    const dailyExpenses = todayTransactions.filter((t) => t.type === "expense").reduce((sum, t) => sum + t.amount, 0)
-
-    return { dailyIncome, dailyExpenses }
-  }, [transactions])
-
-  // Update transactions filtering based on selected filter
+  // Filter transactions
   const filteredTransactions = useMemo(() => {
     if (selectedFilter === "all") return transactions
-    return transactions.filter((t) => t.type === selectedFilter)
+    return transactions.filter(t => t.type === selectedFilter)
   }, [transactions, selectedFilter])
 
   // Group transactions by date
   const groupedTransactions = useMemo(() => {
     const groups: { [key: string]: Transaction[] } = {}
 
-    filteredTransactions.forEach((transaction) => {
-      const dateKey = transaction.date.toDateString()
+    filteredTransactions.forEach(transaction => {
+      const date = transaction.date instanceof Timestamp ? transaction.date.toDate() : transaction.date
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      
       if (!groups[dateKey]) {
         groups[dateKey] = []
       }
+
       groups[dateKey].push(transaction)
     })
 
-    return Object.entries(groups).sort(([a], [b]) => new Date(b).getTime() - new Date(a).getTime())
+    return Object.entries(groups)
+      .sort(([a], [b]) => new Date(b).getTime() - new Date(a).getTime())
   }, [filteredTransactions])
+
+  // Calculate daily totals
+  const dailyTotals = useMemo(() => {
+    const today = new Date()
+    const todayTransactions = transactions.filter(t => {
+      const tDate = t.date instanceof Timestamp ? t.date.toDate() : t.date
+      const isToday = tDate.getDate() === today.getDate() &&
+                      tDate.getMonth() === today.getMonth() &&
+                      tDate.getFullYear() === today.getFullYear()
+      return isToday
+    })
+
+    const dailyIncome = todayTransactions
+      .filter(t => t.type === "income")
+      .reduce((sum, t) => sum + t.amount, 0)
+
+    const dailyExpenses = todayTransactions
+      .filter(t => t.type === "expense")
+      .reduce((sum, t) => sum + t.amount, 0)
+
+    return { dailyIncome, dailyExpenses }
+  }, [transactions])
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
     }).format(amount)
-  }
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    const today = new Date()
-    const yesterday = new Date(today)
-    yesterday.setDate(yesterday.getDate() - 1)
-
-    if (date.toDateString() === today.toDateString()) {
-      return "Today"
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return "Yesterday"
-    } else {
-      return date.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-      })
-    }
-  }
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    })
   }
 
   const sumTransactions = (transactions: Transaction[]) => {
@@ -114,7 +105,7 @@ export default function LogsScreen() {
         <View style={styles.transactionInfo}>
           <Text style={styles.transactionTitle}>{transaction.title}</Text>
           <Text style={styles.transactionMeta}>
-            {transaction.category} • {formatTime(transaction.date)}
+            {transaction.category} • {formatTime(convertToDate(transaction.date))}
           </Text>
           {transaction.note && (
             <Text style={styles.transactionNote} numberOfLines={1}>
@@ -133,10 +124,35 @@ export default function LogsScreen() {
     </TouchableOpacity>
   )
 
+  useEffect(() => {
+    const handleTransactionAdded = () => {
+      refetch()
+    }
+
+    window.addEventListener('TRANSACTION_ADDED', handleTransactionAdded)
+    return () => window.removeEventListener('TRANSACTION_ADDED', handleTransactionAdded)
+  }, [refetch])
+
+  useEffect(() => {
+    refetch()
+  }, [refreshKey])
+
   if (!user) {
     return (
       <View style={styles.loadingContainer}>
         <Text>Please log in to view transactions</Text>
+      </View>
+    )
+  }
+
+  // Show error state if there's an error
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>Failed to load transactions</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={refetch}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     )
   }
@@ -188,14 +204,6 @@ export default function LogsScreen() {
           <View style={styles.loadingContainer}>
             <Text style={styles.loadingText}>Loading transactions...</Text>
           </View>
-        ) : error ? (
-          <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle" size={48} color="#EF4444" />
-            <Text style={styles.errorText}>Failed to load transactions</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={refetch}>
-              <Text style={styles.retryButtonText}>Try Again</Text>
-            </TouchableOpacity>
-          </View>
         ) : groupedTransactions.length > 0 ? (
           groupedTransactions.map(([dateString, dayTransactions]) => (
             <View key={dateString} style={styles.dateGroup}>
@@ -243,23 +251,23 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 40,
+    padding: 20,
   },
   errorText: {
-    fontSize: 18,
-    color: Colors.text,
-    marginTop: 16,
-    marginBottom: 20,
+    fontSize: 16,
+    color: Colors.error,
+    marginBottom: 16,
   },
   retryButton: {
     backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     borderRadius: 8,
   },
-  retryButtonText: {
+  retryText: {
     color: "white",
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: "500",
   },
   header: {
     flexDirection: "row",

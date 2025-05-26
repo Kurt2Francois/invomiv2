@@ -10,18 +10,17 @@ export interface User {
 }
 
 export interface Transaction {
-  id?: string
+  id: string
   userId: string
   type: "income" | "expense"
   amount: number
   title: string
   category: string
   note?: string
-  date: Date
-  createdAt: Date
-  updatedAt: Date
+  date: Date | Timestamp
+  createdAt: Date | Timestamp
+  updatedAt?: Date | Timestamp
 }
-
 export interface Category {
   id?: string
   userId: string
@@ -124,7 +123,7 @@ export interface TransactionFormData {
   amount: string
   title: string
   category: string
-  note?: string
+  note: string
   date: Date
 }
 

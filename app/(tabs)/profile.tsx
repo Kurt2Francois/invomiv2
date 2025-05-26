@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, TextInput, Modal } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { router } from "expo-router"
+import { router, useNavigation } from "expo-router"
 import { Colors } from "../../constants/colors"
 import { useAuth } from "../hooks/useAuth"
 import { useTransactions } from "../hooks/useTransactions"
@@ -31,8 +31,10 @@ interface MonthlyReport {
 
 export default function ProfileScreen() {
   const { user, userProfile } = useAuth()
-  const { transactions } = useTransactions()
-  const { budgets } = useBudgets()
+  const { transactions, loading: transactionsLoading, refetch: refetchTransactions } = useTransactions(user?.uid)
+  const { budgets, loading: budgetsLoading, refetch: refetchBudgets } = useBudgets(user?.uid)
+  const navigation = useNavigation()
+  
   const [showEditModal, setShowEditModal] = useState(false)
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState<UserProfileFormData>({
@@ -41,17 +43,33 @@ export default function ProfileScreen() {
     avatar: userProfile?.avatar || "",
   })
 
-  const stats = {
-    totalTransactions: transactions.length,
-    totalCategories: new Set(transactions.map((t) => t.category)).size,
-    totalBudgets: budgets.length,
-    joinDate: userProfile?.createdAt
-      ? new Date(userProfile.createdAt).toLocaleDateString("en-US", {
-          month: "long",
-          year: "numeric",
-        })
-      : "Unknown",
-  }
+  // Replace router.addListener with useEffect focus handling
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      refetchTransactions()
+      refetchBudgets()
+    })
+
+    return unsubscribe
+  }, [])
+
+  // Update stats calculation with proper filtering and counting
+  const stats = useMemo(() => {
+    const activeCategories = new Set(transactions.map(t => t.category))
+    const activeBudgets = budgets.filter(b => b.isActive) // Changed from isArchived
+
+    return {
+      totalTransactions: transactions.length,
+      totalCategories: activeCategories.size,
+      totalBudgets: activeBudgets.length,
+      joinDate: userProfile?.createdAt
+        ? new Date(userProfile.createdAt).toLocaleDateString("en-US", {
+            month: "long",
+            year: "numeric",
+          })
+        : "Unknown",
+    }
+  }, [transactions, budgets, userProfile?.createdAt])
 
   const menuItems = [
     {
@@ -142,7 +160,7 @@ export default function ProfileScreen() {
           try {
             await logoutUser()
             // Change this line to redirect to app root
-            router.replace("/")
+            router.replace("/login")
           } catch (error) {
             console.error("Logout error:", error)
             Alert.alert("Error", "Failed to logout. Please try again.")
@@ -269,17 +287,23 @@ ${report.budgetComparison
       {/* Stats Card */}
       <View style={styles.statsCard}>
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{stats.totalTransactions}</Text>
+          <Text style={styles.statValue}>
+            {transactionsLoading ? "..." : stats.totalTransactions}
+          </Text>
           <Text style={styles.statLabel}>Transactions</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{stats.totalCategories}</Text>
+          <Text style={styles.statValue}>
+            {transactionsLoading ? "..." : stats.totalCategories}
+          </Text>
           <Text style={styles.statLabel}>Categories</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{stats.totalBudgets}</Text>
+          <Text style={styles.statValue}>
+            {budgetsLoading ? "..." : stats.totalBudgets}
+          </Text>
           <Text style={styles.statLabel}>Budgets</Text>
         </View>
       </View>

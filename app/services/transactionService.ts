@@ -149,35 +149,18 @@ export const getTransaction = async (transactionId: string): Promise<Transaction
 }
 
 // Update: Edit transaction
-export const updateTransaction = async (
-  transactionId: string,
-  updates: Partial<Omit<Transaction, "id" | "createdAt" | "updatedAt">>,
-): Promise<void> => {
-  try {
-    const updateData: any = {
-      ...updates,
-      updatedAt: Timestamp.fromDate(new Date()),
-    }
-
-    if (updates.date) {
-      updateData.date = Timestamp.fromDate(updates.date)
-    }
-
-    await updateDoc(doc(db, "transactions", transactionId), updateData)
-  } catch (error) {
-    console.error("Update transaction error:", error)
-    throw error
-  }
+export const updateTransaction = async (id: string, data: Partial<Transaction>): Promise<void> => {
+  const transactionRef = doc(db, "transactions", id)
+  await updateDoc(transactionRef, {
+    ...data,
+    updatedAt: Timestamp.fromDate(new Date()),
+  })
 }
 
 // Delete: Remove transaction
-export const deleteTransaction = async (transactionId: string): Promise<void> => {
-  try {
-    await deleteDoc(doc(db, "transactions", transactionId))
-  } catch (error) {
-    console.error("Delete transaction error:", error)
-    throw error
-  }
+export const deleteTransaction = async (id: string): Promise<void> => {
+  const transactionRef = doc(db, "transactions", id)
+  await deleteDoc(transactionRef)
 }
 
 // Get transactions by category
